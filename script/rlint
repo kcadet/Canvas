@@ -1,0 +1,90 @@
+#!/usr/bin/env ruby
+$:.push File.expand_path("../../gems/rubocop-canvas/lib", __FILE__)
+
+def git_diff(git, sha)
+  unless sha
+    return git.diff if git.dirty?
+    sha = git.head_sha
+  end
+  git.show(sha)
+end
+
+def get_offenses_json(file_sieve, env_sha)
+  ruby_files = file_sieve.files(env_sha)
+  return {} unless ruby_files.size > 0
+  json = `rubocop #{ruby_files.join(' ')} --format json`
+  JSON.parse(json)
+end
+
+def pretty_comment(comment)
+  message = ""
+  message += "[#{comment[:severity]}]".colorize(:yellow)
+  message += " #{comment[:path].colorize(:light_blue)}:#{comment[:position]}"
+  message += " => #{comment[:message].colorize(:green)}"
+  puts message
+end
+
+require 'rubocop_canvas'
+require 'optparse'
+
+cli = RuboCop::CLI.new
+if ENV['GERRIT_PATCHSET_REVISION']
+  require 'rubocop_canvas/helpers/comments'
+  require 'shellwords'
+  env_sha = ENV['GERRIT_PATCHSET_REVISION']
+  plugin = ENV['GERRIT_PROJECT']
+  plugin = nil if plugin == 'canvas-lms'
+  git_dir = "gems/plugins/#{plugin}/" if plugin
+  if git_dir && !Dir.exist?(git_dir)
+    puts "No plugin #{plugin} found"
+    exit 0
+  end
+
+  file_sieve = RuboCop::Canvas::FileSieve.new(git_dir: git_dir)
+  results_json = get_offenses_json(file_sieve, env_sha)
+  unless results_json.empty?
+    diff = git_diff(file_sieve.git, env_sha)
+    comments = RuboCop::Canvas::Comments.build(diff, results_json,
+                                               git_dir: git_dir,
+                                               include_git_dir_in_output: false)
+    `gergich comment #{Shellwords.escape(comments.to_json)}`
+  end
+else
+  heavy_mode = false
+  boyscout_mode = false
+  plugin = nil
+  OptionParser.new do |opts|
+    opts.on("--heavy") { heavy_mode = true }
+    opts.on("--boy-scout") { boyscout_mode = true }
+    opts.on("--plugin PLUGIN") { |v| plugin = v }
+  end.parse!
+  git_dir = "gems/plugins/#{plugin}/" if plugin
+
+  env_sha = ENV['SHA']
+  file_sieve = RuboCop::Canvas::FileSieve.new(git_dir: git_dir)
+  ruby_files = file_sieve.files(env_sha)
+  if ruby_files.size > 0
+    if heavy_mode
+      args = ruby_files
+      args_index = ARGV.index('--')
+      if args_index
+        args.concat(ARGV[(args_index + 1)..-1])
+      end
+      cli.run(args)
+    else
+      require 'colorize'
+      output_filename = ".rubocop-output.json"
+      cli.run(ruby_files + ["--format", "json", "--out", output_filename])
+      results_json = JSON.parse(File.read(output_filename))
+      diff = git_diff(file_sieve.git, env_sha)
+      comments = RuboCop::Canvas::Comments.build(diff,
+                                                 results_json,
+                                                 git_dir: git_dir,
+                                                 boyscout_mode: boyscout_mode)
+      comments.each{ |comment| pretty_comment(comment) }
+      File.delete(output_filename)
+    end
+  else
+    puts "No ruby file changes found!"
+  end
+end

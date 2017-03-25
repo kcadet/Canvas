@@ -1,0 +1,45 @@
+/* Functional Variables */
+$menu-item-text-hover-focus-color: $ic-color-dark;
+$menu-item-text-disabled-color: $ic-color-dark;
+$menu-item-keyboard-shortcut-color: $ic-color-dark;
+
+.mce-tinymce{
+  .mce-container-body {
+    overflow: auto;
+  }
+
+  :focus {
+    outline: dotted 1px;
+  }
+}
+
+// puts the blue glow around each little color sqare in the tinyMCE text/bg color picker
+.mce-grid td.mce-grid-cell div:focus{
+  @include tab-focus();
+  outline-offset: 0px;
+
+}
+
+.mce-menu-item {
+  .mce-disabled {
+    .mce-text {
+      color: $menu-item-text-disabled-color;
+    }
+  }
+  .mce-menu-shortcut {
+    color: $menu-item-keyboard-shortcut-color;
+  }
+
+  &:focus, &:hover {
+    .mce-ico, .mce-menu-shortcut, .mce-text {
+      color: $menu-item-text-hover-focus-color;
+    }
+    .mce-caret {
+      border-left-color: $menu-item-text-hover-focus-color
+    }
+  }
+}
+
+.mce-statusbar .mce-container-body {
+  overflow: hidden;
+}

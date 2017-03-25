@@ -1,0 +1,74 @@
+<li style="<%= hidden if is_hidden %>" class="event">
+
+<%
+  recent_event ||= nil
+  show_context ||= false
+  is_assignment = recent_event.is_a?(Assignment)
+  is_calendar_event = recent_event.is_a?(CalendarEvent)
+  if is_assignment
+    if @current_user_submissions
+      submission = @current_user_submissions.detect { |s| s.assignment_id == recent_event.id }
+    elsif @current_user
+      submission = @current_user.submissions.select([:id, :assignment_id, :score, :grade, :workflow_state, :updated_at]).where(:assignment_id => recent_event).first
+    end
+
+    if is_assignment
+      recent_event = recent_event.overridden_for(@current_user)
+    end
+  end
+
+  cache([ 'recent_event_render3',
+          @current_user, # needs to be here to bust the cache when the user changes course nicknames
+          submission || 'no_submission',
+          recent_event || 'blank_event',
+          (recent_event.due_at if is_assignment),
+          Time.zone.today,
+          Time.zone.name,
+          recent_event.context.grants_right?(@current_user, :manage_grades),
+          recent_event.context.grants_right?(@current_user, :participate_as_student)
+        ].cache_key) do
+    icon_explanation, icon_aria_label, icon_class = icon_data(:context => @context,
+                                                              :contexts => @contexts,
+                                                              :current_user => @current_user,
+                                                              :recent_event => recent_event,
+                                                              :submission => submission,
+                                                              :show_assignment_type_icon => true)
+    if is_calendar_event
+      context = recent_event.effective_context
+    else
+      context = recent_event.context
+    end
+
+%>
+
+  <a
+    data-track-category="dashboard"
+    data-track-label="recent event"
+    href="<%= recent_event_url(recent_event) %>"
+  >
+    <i class="<%= icon_class %>" aria-label="<%= icon_aria_label %>"></i>
+    <div class="event-details">
+      <b><%= recent_event.title %></b>
+      <% if show_context %>
+        <p><%= context.nickname_for(@current_user) %></p>
+      <% end %>
+      <p>
+        <% if is_assignment %>
+          <% if submission && readable_grade(submission) && !recent_event.muted? %>
+            <%= readable_grade(submission) %>
+            &bullet;
+          <% elsif recent_event.points_possible %>
+            <%= t({one: '1 point', other: '%{count} points'}, count: recent_event.points_possible) %>
+            &bullet;
+          <% end %>
+          <%= due_at(recent_event, @current_user) %>
+        <% else %>
+          <%= datetime_string(recent_event.start_at) %>
+        <% end %>
+      </p>
+    </div>
+  </a>
+
+<% end %>
+
+</li>

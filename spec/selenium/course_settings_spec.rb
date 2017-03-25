@@ -1,0 +1,418 @@
+require File.expand_path(File.dirname(__FILE__) + '/common')
+
+describe "course settings" do
+  include_context "in-process server selenium tests"
+
+  before (:each) do
+    course_with_teacher_logged_in :limit_privileges_to_course_section => false
+    @account = @course.account
+  end
+
+  it "should show unused tabs to teachers" do
+    get "/courses/#{@course.id}/settings"
+    wait_for_ajaximations
+    expect(ff("#section-tabs .section.section-tab-hidden").count).to be > 0
+  end
+
+  describe "course details" do
+    def test_select_standard_for(context)
+      grading_standard_for context
+      get "/courses/#{@course.id}/settings"
+
+      f('.grading_standard_checkbox').click unless is_checked('.grading_standard_checkbox')
+      f('.edit_letter_grades_link').click
+      f('.find_grading_standard_link').click
+      wait_for_ajaximations
+
+      fj('.grading_standard_select:visible a').click
+      fj('button.select_grading_standard_link:visible').click
+      f('.done_button').click
+      submit_form('#course_form')
+      wait_for_ajaximations
+
+      @course.reload
+      expect(@course.grading_standard).to eq(@standard)
+    end
+
+    it 'should show the correct course status when published' do
+      get "/courses/#{@course.id}/settings"
+      expect(f('#course-status').text).to eq 'Course is Published'
+    end
+
+    it 'should show the correct course status when unpublished' do
+      @course.workflow_state = 'claimed'
+      @course.save!
+      get "/courses/#{@course.id}/settings"
+      expect(f('#course-status').text).to eq 'Course is Unpublished'
+    end
+
+    it "should show the correct status with a tooltip when published and graded submissions" do
+      course_with_student_submissions({submission_points: true})
+      get "/courses/#{@course.id}/settings"
+      course_status = f('#course-status')
+      expect(course_status.text).to eq 'Course is Published'
+      expect(course_status).to have_attribute('title', 'You cannot unpublish this course if there are graded student submissions')
+    end
+
+    it "should allow selection of existing course grading standard" do
+      test_select_standard_for @course
+    end
+
+    it "should allow selection of existing account grading standard" do
+      test_select_standard_for @course.root_account
+    end
+
+    it "should toggle more options correctly" do
+      more_options_text = 'more options'
+      fewer_options_text = 'fewer options'
+      get "/courses/#{@course.id}/settings"
+
+      more_options_link = f('.course_form_more_options_link')
+      expect(more_options_link.text).to eq more_options_text
+      more_options_link.click
+      extra_options = f('.course_form_more_options')
+      expect(extra_options).to be_displayed
+      expect(more_options_link.text).to eq fewer_options_text
+      more_options_link.click
+      wait_for_ajaximations
+      expect(extra_options).not_to be_displayed
+      expect(more_options_link.text).to eq more_options_text
+    end
+
+    it "should show the self enrollment code and url once enabled" do
+      a = Account.default
+      a.courses << @course
+      a.settings[:self_enrollment] = 'manually_created'
+      a.save!
+      get "/courses/#{@course.id}/settings"
+      f('.course_form_more_options_link').click
+      wait_for_ajaximations
+      f('#course_self_enrollment').click
+      wait_for_ajaximations
+      submit_form('#course_form')
+      wait_for_ajaximations
+
+      code = @course.reload.self_enrollment_code
+      expect(code).not_to be_nil
+      # this element _can_ still be on the page if the post hasn't finished yet,
+      # so make sure it's been populated before continuing
+      wait = Selenium::WebDriver::Wait.new(timeout: 5)
+      wait.until do
+        el = f('.self_enrollment_message')
+        el.present? &&
+        el.text != nil &&
+        el.text != ""
+      end
+      message = f('.self_enrollment_message')
+      expect(message.text).to include(code)
+      expect(message.text).not_to include('self_enrollment_code')
+    end
+  end
+
+  describe "course items" do
+
+    it "should change course details" do
+      course_name = 'new course name'
+      course_code = 'new course-101'
+      locale_text = 'English (US)'
+      time_zone_value = 'Central Time (US & Canada)'
+
+      get "/courses/#{@course.id}/settings"
+
+      course_form = f('#course_form')
+      name_input = course_form.find_element(:id, 'course_name')
+      replace_content(name_input, course_name)
+      code_input = course_form.find_element(:id, 'course_course_code')
+      replace_content(code_input, course_code)
+      click_option('#course_locale', locale_text)
+      click_option('#course_time_zone', time_zone_value, :value)
+      f('.course_form_more_options_link').click
+      wait_for_ajaximations
+      expect(f('.course_form_more_options')).to be_displayed
+      submit_form(course_form)
+      wait_for_ajaximations
+
+      @course.reload
+      expect(@course.name).to eq course_name
+      expect(@course.course_code).to eq course_code
+      expect(@course.locale).to eq 'en'
+      expect(@course.time_zone.name).to eq time_zone_value
+    end
+
+    it "should disable from Course Navigation tab", priority: "1", test_id: 112172 do
+      get "/courses/#{@course.id}/settings#tab-navigation"
+      ff(".al-trigger")[0].click
+      ff(".icon-x")[0].click
+      wait_for_ajaximations
+      f('#nav_form > p:nth-of-type(2) > button.btn.btn-primary').click
+      wait_for_ajaximations
+      f('.student_view_button').click
+      wait_for_ajaximations
+      expect(fln("Home")).not_to be_present
+    end
+
+    it "should add a section" do
+      section_name = 'new section'
+      get "/courses/#{@course.id}/settings#tab-sections"
+
+      section_input = nil
+      keep_trying_until do
+        section_input = f('#course_section_name')
+        expect(section_input).to be_displayed
+      end
+      replace_content(section_input, section_name)
+      submit_form('#add_section_form')
+      wait_for_ajaximations
+      new_section = ff('#sections > .section')[1]
+      expect(new_section).to include_text(section_name)
+    end
+
+    it "should delete a section" do
+      add_section('Delete Section')
+      get "/courses/#{@course.id}/settings#tab-sections"
+
+      keep_trying_until do
+        body = f('body')
+        expect(body).to include_text('Delete Section')
+      end
+
+      f('.delete_section_link').click
+      keep_trying_until do
+        expect(driver.switch_to.alert).not_to be_nil
+        driver.switch_to.alert.accept
+        true
+      end
+      wait_for_ajaximations
+      expect(ff('#sections > .section').count).to eq 1
+    end
+
+    it "should edit a section" do
+      edit_text = 'Section Edit Text'
+      add_section('Edit Section')
+      get "/courses/#{@course.id}/settings#tab-sections"
+
+      keep_trying_until do
+        body = f('body')
+        expect(body).to include_text('Edit Section')
+      end
+
+      f('.edit_section_link').click
+      section_input = f('#course_section_name_edit')
+      keep_trying_until { expect(section_input).to be_displayed }
+      replace_content(section_input, edit_text)
+      section_input.send_keys(:return)
+      wait_for_ajaximations
+      expect(ff('#sections > .section')[0]).to include_text(edit_text)
+    end
+
+    it "should move a nav item to disabled" do
+      skip('fragile')
+      get "/courses/#{@course.id}/settings#tab-navigation"
+      keep_trying_until do
+        body = f('body')
+        expect(body).to include_text('Drag and drop items to reorder them in the course navigation.')
+      end
+      disabled_div = f('#nav_disabled_list')
+      announcements_nav = f('#nav_edit_tab_id_14')
+      driver.action.click_and_hold(announcements_nav).
+          move_to(disabled_div).
+          release(disabled_div).
+          perform
+      keep_trying_until { expect(f('#nav_disabled_list')).to include_text(announcements_nav.text) }
+    end
+  end
+
+  context "right sidebar" do
+    it "should allow entering student view from the right sidebar" do
+      @fake_student = @course.student_view_student
+      get "/courses/#{@course.id}/settings"
+      f(".student_view_button").click
+      wait_for_ajaximations
+      expect(f("#identity .user_name")).to include_text @fake_student.name
+    end
+
+    it "should allow leaving student view" do
+      enter_student_view
+      stop_link = f("#masquerade_bar .leave_student_view")
+      expect(stop_link).to include_text "Leave Student View"
+      stop_link.click
+      wait_for_ajaximations
+      expect(f("#identity .user_name")).to include_text @teacher.name
+    end
+
+    it "should allow resetting student view" do
+      @fake_student_before = @course.student_view_student
+      enter_student_view
+      reset_link = f("#masquerade_bar .reset_test_student")
+      expect(reset_link).to include_text "Reset Student"
+      reset_link.click
+      wait_for_ajaximations
+      @fake_student_after = @course.student_view_student
+      expect(@fake_student_before.id).not_to eq @fake_student_after.id
+    end
+
+    it "should not include student view student in the statistics count" do
+      @fake_student = @course.student_view_student
+      get "/courses/#{@course.id}/settings"
+      expect(fj('.summary tr:nth(0)').text).to match /Students:\s*None/
+    end
+
+    it "should show the count of custom role enrollments" do
+      teacher_role = custom_teacher_role("teach")
+      student_role = custom_student_role("weirdo")
+
+      custom_ta_role("taaaa")
+      course_with_student(:course => @course, :role => student_role)
+      student_role.deactivate!
+      course_with_teacher(:course => @course, :role => teacher_role)
+      get "/courses/#{@course.id}/settings"
+      expect(fj('.summary tr:nth(1)').text).to match /weirdo \(inactive\):\s*1/
+      expect(fj('.summary tr:nth(3)').text).to match /teach:\s*1/
+      expect(fj('.summary tr:nth(5)').text).to match /taaaa:\s*None/
+    end
+  end
+
+  it "should disable inherited settings if locked by the account" do
+    @account.settings[:restrict_student_future_view] = {:locked => true, :value => true}
+    @account.save!
+
+    get "/courses/#{@course.id}/settings"
+
+    expect(f('#course_restrict_student_past_view').attribute('disabled')).to be_nil
+    expect(f('#course_restrict_student_future_view').attribute('disabled')).to_not be_nil
+
+    expect(is_checked('#course_restrict_student_future_view')).to be_truthy
+  end
+
+  it "should disable editing settings if :manage rights are not granted" do
+    user(:active_all => true)
+    user_session(@user)
+    role = custom_account_role('role', :account => @account)
+    @account.role_overrides.create!(:permission => 'read_course_content', :role => role, :enabled => true)
+    @account.role_overrides.create!(:permission => 'manage_content', :role => role, :enabled => false)
+    @course.account.account_users.create!(:user => @user, :role => role)
+
+    get "/courses/#{@course.id}/settings"
+
+    ffj("#tab-details input:visible").each do |input|
+      expect(input.attribute('disabled')).to be_present
+    end
+    expect(f(".course_form button[type='submit']")).to be_nil
+  end
+
+  context "link validator" do
+    it "should validate all the links" do
+      CourseLinkValidator.any_instance.stubs(:reachable_url?).returns(false).once # don't actually ping the links for the specs
+
+      course_with_teacher_logged_in
+      attachment_model
+
+      bad_url = "http://www.notarealsitebutitdoesntmattercauseimstubbingitanwyay.com"
+      bad_url2 = "/courses/#{@course.id}/file_contents/baaaad"
+      html = %{
+      <a href="#{bad_url}">Bad absolute link</a>
+      <img src="#{bad_url2}">Bad file link</a>
+      <img src="/courses/#{@course.id}/file_contents/#{CGI.escape(@attachment.full_display_path)}">Ok file link</a>
+      <a href="/courses/#{@course.id}/quizzes">Ok other link</a>
+    }
+
+      @course.syllabus_body = html
+      @course.save!
+
+      bank = @course.assessment_question_banks.create!(:title => 'bank')
+      aq = bank.assessment_questions.create!(:question_data => {'question_name' => 'test question',
+        'question_text' => html, 'answers' => [{'id' => 1}, {'id' => 2}]})
+
+      assmnt = @course.assignments.create!(:title => 'assignment', :description => html)
+      event = @course.calendar_events.create!(:title => "event", :description => html)
+      topic = @course.discussion_topics.create!(:title => "discussion title", :message => html)
+      mod = @course.context_modules.create!(:name => "some module")
+      tag = mod.add_item(:type => 'external_url', :url => bad_url, :title => 'pls view')
+      page = @course.wiki.wiki_pages.create!(:title => "wiki", :body => html)
+      quiz = @course.quizzes.create!(:title => 'quiz1', :description => html)
+
+      qq = quiz.quiz_questions.create!(:question_data => aq.question_data.merge('question_name' => 'other test question'))
+
+      get "/courses/#{@course.id}/settings"
+
+      expect_new_page_load{ f(".validator_link").click }
+
+      f('#link_validator_wrapper button').click
+      wait_for_ajaximations
+      run_jobs
+
+      keep_trying_until do
+        wait_for_ajaximations
+        expect(f("#all-results")).to be_displayed
+      end
+
+      expect(f("#all-results .alert")).to include_text("Found 17 broken links")
+
+      result_links = ff("#all-results .result a")
+      expect(result_links.map{|link| link.text.strip}).to match_array([
+        'Course Syllabus',
+        aq.question_data[:question_name],
+        qq.question_data[:question_name],
+        assmnt.title,
+        event.title,
+        topic.title,
+        tag.title,
+        quiz.title,
+        page.title
+      ])
+    end
+
+    it "should be able to filter links to unpublished content" do
+      course_with_teacher_logged_in
+
+      active = @course.assignments.create!(:title => "blah")
+      unpublished = @course.assignments.create!(:title => "blah")
+      unpublished.unpublish!
+      deleted = @course.assignments.create!(:title => "blah")
+      deleted.destroy
+
+      active_link = "/courses/#{@course.id}/assignments/#{active.id}"
+      unpublished_link = "/courses/#{@course.id}/assignments/#{unpublished.id}"
+      deleted_link = "/courses/#{@course.id}/assignments/#{deleted.id}"
+
+      @course.syllabus_body = %{
+        <a href='#{active_link}'>link</a>
+        <a href='#{unpublished_link}'>link</a>
+        <a href='#{deleted_link}'>link</a>
+      }
+      @course.save!
+      page = @course.wiki.wiki_pages.create!(:title => "wikiii", :body => %{<a href='#{unpublished_link}'>link</a>})
+
+      get "/courses/#{@course.id}/link_validator"
+      f('#link_validator_wrapper button').click
+      wait_for_ajaximations
+      run_jobs
+
+      keep_trying_until do
+        wait_for_ajaximations
+        expect(f("#all-results")).to be_displayed
+      end
+
+      expect(f("#all-results .alert")).to include_text("Found 3 broken links")
+      syllabus_result = ff('#all-results .result').detect{|r| r.text.include?("Course Syllabus")}
+      expect(syllabus_result).to include_text(unpublished_link)
+      expect(syllabus_result).to include_text(deleted_link)
+      page_result = ff('#all-results .result').detect{|r| r.text.include?(page.title)}
+      expect(page_result).to include_text(unpublished_link)
+
+      f('#show_unpublished').click # hide the unpublished results
+      wait_for_ajaximations
+
+      expect(f("#all-results .alert")).to include_text("Found 1 broken link")
+      expect(ff("#all-results .result a").count).to eq 1
+      result = f("#all-results .result")
+      expect(result).to include_text("Course Syllabus")
+      expect(result).to include_text(deleted_link)
+
+      f('#show_unpublished').click # show them again
+      expect(f("#all-results .alert")).to include_text("Found 3 broken links")
+      page_result = ff('#all-results .result').detect{|r| r.text.include?(page.title)}
+      expect(page_result).to include_text(unpublished_link)
+    end
+  end
+end

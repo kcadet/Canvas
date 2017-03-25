@@ -1,0 +1,50 @@
+@import "base/environment";
+
+.account > .header .edit_account {
+  display: none;
+  form {
+    margin: 0;
+  }
+}
+
+.account > .header {
+  padding: $ic-sp/3 $ic-sp;
+  box-sizing: border-box;
+  .name { @if $use_new_styles { font-weight: 500; } }
+}
+
+.account.editing_account > .header .edit_account {
+  display: block;
+}
+
+.account.editing_account > .header .show_account {
+  display: none;
+}
+
+.header .links {
+  padding-left: $ic-sp;
+  float: right;
+}
+
+.header.header_hover {
+  background-color: $ic-bg-light-primary;
+  border-radius: $baseBorderRadius;
+}
+
+.header {
+  .courses_count, .sub_accounts_count {
+    color: $ic-font-color--subdued;
+    @include fontSize(12px);
+  }
+}
+
+ul.sub_accounts {
+  list-style-type: none;
+  margin: 10px;
+  padding-left: 20px;
+  margin-right: 0;
+}
+
+ul.sub_accounts .account {
+  min-height: 40px;
+}
