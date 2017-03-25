@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 Canvas LMS
 ======
 
@@ -15,3 +16,7 @@ on our wiki.
 
  * [Quick Start](http://github.com/instructure/canvas-lms/wiki/Quick-Start)
  * [Production Start](http://github.com/instructure/canvas-lms/wiki/Production-Start)
+=======
+# Canvas
+Learning Management System
+>>>>>>> b072f67504dfc4eaa5d001088929982aab5cdefa
